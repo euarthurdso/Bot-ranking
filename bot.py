@@ -8,9 +8,6 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
-# =========================
-# CONFIGURAÇÃO
-# =========================
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -19,14 +16,12 @@ CANAL_APROVADOS_ID = 1484593179519881379
 CANAL_RANKING_ID = 1490386122168209569
 CARGO_RECRUTADOR_ID = 1477814598102155446
 
-# Só superiores podem mexer no painel/comandos administrativos
 CARGOS_ALTOS_IDS = {
     1458178976190169121,
     1458952733494218912,
     1489691679635144936,
 }
 
-# IDs ignorados
 IGNORAR_IDS = {
     90931502673148703,
     145847022190304617,
@@ -38,9 +33,6 @@ IGNORAR_IDS = {
 DB_FILE = "recrutadores.db"
 
 
-# =========================
-# BANCO DE DADOS
-# =========================
 
 def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_FILE)
