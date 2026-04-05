@@ -11,7 +11,8 @@ from discord import app_commands
 # CONFIGURAÇÃO
 # =========================
 
-TOKEN = "COLOQUE_O_TOKEN_DO_BOT_AQUI"
+import os
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 GUILD_ID = 1458175649402454058
 CANAL_APROVADOS_ID = 1484593179519881379
