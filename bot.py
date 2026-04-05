@@ -1,3 +1,4 @@
+import os
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -11,7 +12,6 @@ from discord import app_commands
 # CONFIGURAÇÃO
 # =========================
 
-import os
 TOKEN = os.getenv("DISCORD_TOKEN")
 
 GUILD_ID = 1458175649402454058
@@ -19,12 +19,14 @@ CANAL_APROVADOS_ID = 1484593179519881379
 CANAL_RANKING_ID = 1490386122168209569
 CARGO_RECRUTADOR_ID = 1477814598102155446
 
+# Só superiores podem mexer no painel/comandos administrativos
 CARGOS_ALTOS_IDS = {
-    1458178976190169121, 
-    1458952733494218912,  
-    1489691679635144936,  
+    1458178976190169121,
+    1458952733494218912,
+    1489691679635144936,
 }
 
+# IDs ignorados
 IGNORAR_IDS = {
     90931502673148703,
     145847022190304617,
@@ -240,12 +242,14 @@ def extrair_ids_do_texto(texto: str) -> list[int]:
 
 
 def parsear_mensagem_aprovacao(message: discord.Message) -> Optional[ResultadoParse]:
+    # Ignora mensagens de erro
     for embed in message.embeds:
         titulo = (embed.title or "").lower()
         descricao = (embed.description or "").lower()
         if "erro" in titulo or "erro" in descricao:
             return None
 
+    # Tenta extrair do embed
     for embed in message.embeds:
         titulo = (embed.title or "").lower()
         descricao = embed.description or ""
@@ -258,6 +262,7 @@ def parsear_mensagem_aprovacao(message: discord.Message) -> Optional[ResultadoPa
                     approved_id=ids_mencionados[1]
                 )
 
+    # Tenta extrair do conteúdo normal
     content = message.content or ""
     if "aprovou o formulário" in content.lower():
         ids_mencionados = extrair_ids_do_texto(content)
@@ -267,6 +272,7 @@ def parsear_mensagem_aprovacao(message: discord.Message) -> Optional[ResultadoPa
                 approved_id=ids_mencionados[1]
             )
 
+    # Fallback nas mentions reais
     if len(message.mentions) >= 2:
         return ResultadoParse(
             approver_id=message.mentions[0].id,
@@ -334,7 +340,7 @@ def montar_embed_ranking(guild: discord.Guild) -> discord.Embed:
 
 
 # =========================
-# VIEW / BOTÕES
+# MODAIS
 # =========================
 
 class AddRecruitmentModal(discord.ui.Modal, title="Adicionar recrutamento"):
@@ -439,6 +445,10 @@ class ResetRecruitmentModal(discord.ui.Modal, title="Resetar recrutamento"):
         )
 
 
+# =========================
+# VIEW / BOTÕES
+# =========================
+
 class RankingView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -497,12 +507,21 @@ class RankingView(discord.ui.View):
 
 
 # =========================
-# FUNÇÃO DE PAINEL
+# PAINEL
 # =========================
 
 async def atualizar_painel_ranking(guild: discord.Guild) -> None:
     canal = guild.get_channel(CANAL_RANKING_ID)
+
+    if canal is None:
+        try:
+            canal = await bot.fetch_channel(CANAL_RANKING_ID)
+        except Exception as e:
+            print(f"❌ Canal não encontrado: {e}")
+            return
+
     if not isinstance(canal, discord.TextChannel):
+        print("❌ O canal de ranking não é um canal de texto.")
         return
 
     embed = montar_embed_ranking(guild)
@@ -513,14 +532,19 @@ async def atualizar_painel_ranking(guild: discord.Guild) -> None:
         try:
             msg = await canal.fetch_message(message_id)
             await msg.edit(content=None, embed=embed, view=view)
+            print("✅ Painel atualizado")
             return
         except discord.NotFound:
-            pass
-        except discord.HTTPException:
-            pass
+            print("ℹ️ Mensagem antiga não encontrada, criando nova.")
+        except discord.HTTPException as e:
+            print(f"❌ Erro ao editar mensagem: {e}")
 
-    nova_msg = await canal.send(embed=embed, view=view)
-    salvar_mensagem_painel(nova_msg.id)
+    try:
+        nova_msg = await canal.send(embed=embed, view=view)
+        salvar_mensagem_painel(nova_msg.id)
+        print("✅ Painel criado")
+    except discord.HTTPException as e:
+        print(f"❌ Erro ao enviar painel: {e}")
 
 
 # =========================
