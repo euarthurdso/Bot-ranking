@@ -8,6 +8,9 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
+# =========================
+# CONFIGURAÇÃO
+# =========================
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -16,12 +19,14 @@ CANAL_APROVADOS_ID = 1484593179519881379
 CANAL_RANKING_ID = 1490386122168209569
 CARGO_RECRUTADOR_ID = 1477814598102155446
 
+# Cargos superiores que podem usar comandos e botões
 CARGOS_ALTOS_IDS = {
     1458178976190169121,
     1458952733494218912,
     1489691679635144936,
 }
 
+# Usuários ignorados
 IGNORAR_IDS = {
     90931502673148703,
     145847022190304617,
@@ -33,6 +38,9 @@ IGNORAR_IDS = {
 DB_FILE = "recrutadores.db"
 
 
+# =========================
+# BANCO DE DADOS
+# =========================
 
 def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_FILE)
@@ -199,8 +207,10 @@ def buscar_mensagem_painel() -> Optional[int]:
     cur.execute("SELECT valor FROM config WHERE chave = 'ranking_message_id'")
     row = cur.fetchone()
     conn.close()
+
     if not row:
         return None
+
     try:
         return int(row["valor"])
     except ValueError:
@@ -218,8 +228,8 @@ class ResultadoParse:
 
 
 def membro_autorizado(member: discord.Member) -> bool:
-    ids = {role.id for role in member.roles}
-    return bool(ids & CARGOS_ALTOS_IDS)
+    role_ids = {role.id for role in member.roles}
+    return bool(role_ids & CARGOS_ALTOS_IDS)
 
 
 def tem_cargo_recrutador(member: Optional[discord.Member]) -> bool:
@@ -234,14 +244,14 @@ def extrair_ids_do_texto(texto: str) -> list[int]:
 
 
 def parsear_mensagem_aprovacao(message: discord.Message) -> Optional[ResultadoParse]:
-    # Ignora mensagens de erro
+    # ignora mensagens de erro
     for embed in message.embeds:
         titulo = (embed.title or "").lower()
         descricao = (embed.description or "").lower()
         if "erro" in titulo or "erro" in descricao:
             return None
 
-    # Tenta extrair do embed
+    # tenta extrair do embed
     for embed in message.embeds:
         titulo = (embed.title or "").lower()
         descricao = embed.description or ""
@@ -254,7 +264,7 @@ def parsear_mensagem_aprovacao(message: discord.Message) -> Optional[ResultadoPa
                     approved_id=ids_mencionados[1]
                 )
 
-    # Tenta extrair do conteúdo normal
+    # tenta extrair do conteúdo
     content = message.content or ""
     if "aprovou o formulário" in content.lower():
         ids_mencionados = extrair_ids_do_texto(content)
@@ -264,7 +274,7 @@ def parsear_mensagem_aprovacao(message: discord.Message) -> Optional[ResultadoPa
                 approved_id=ids_mencionados[1]
             )
 
-    # Fallback nas mentions reais
+    # fallback
     if len(message.mentions) >= 2:
         return ResultadoParse(
             approver_id=message.mentions[0].id,
@@ -313,14 +323,14 @@ def montar_embed_ranking(guild: discord.Guild) -> discord.Embed:
     rows = buscar_ranking(20)
 
     if not rows:
-        descricao = "Nenhuma aprovação foi contabilizada ainda."
+      descricao = "Nenhuma aprovação foi contabilizada ainda."
     else:
-        linhas = []
-        for pos, row in enumerate(rows, start=1):
-            member = guild.get_member(row["user_id"])
-            nome = member.mention if member else f"<@{row['user_id']}>"
-            linhas.append(f"**{pos}º** — {nome} • `{row['aprovacoes']}` aprovações")
-        descricao = "\n".join(linhas)
+      linhas = []
+      for pos, row in enumerate(rows, start=1):
+          member = guild.get_member(row["user_id"])
+          nome = member.mention if member else f"<@{row['user_id']}>"
+          linhas.append(f"**{pos}º** — {nome} • `{row['aprovacoes']}` aprovações")
+      descricao = "\n".join(linhas)
 
     embed = discord.Embed(
         title="🏆 Ranking de Recrutadores",
@@ -345,7 +355,7 @@ class AddRecruitmentModal(discord.ui.Modal, title="Adicionar recrutamento"):
 
     quantidade_input = discord.ui.TextInput(
         label="Quantidade",
-        placeholder="Digite a quantidade a adicionar",
+        placeholder="Digite a quantidade",
         required=True,
         max_length=10
     )
@@ -438,7 +448,7 @@ class ResetRecruitmentModal(discord.ui.Modal, title="Resetar recrutamento"):
 
 
 # =========================
-# VIEW / BOTÕES
+# BOTÕES
 # =========================
 
 class RankingView(discord.ui.View):
@@ -516,6 +526,25 @@ async def atualizar_painel_ranking(guild: discord.Guild) -> None:
         print("❌ O canal de ranking não é um canal de texto.")
         return
 
+    minhas_permissoes = canal.permissions_for(guild.me)
+    print("===== DEBUG PERMISSÕES RANKING =====")
+    print("Canal:", canal.name, canal.id)
+    print("Ver canal:", minhas_permissoes.view_channel)
+    print("Enviar mensagens:", minhas_permissoes.send_messages)
+    print("Inserir links:", minhas_permissoes.embed_links)
+    print("Ver histórico:", minhas_permissoes.read_message_history)
+    print("====================================")
+
+    if not minhas_permissoes.view_channel:
+        print("❌ Bot sem permissão de ver o canal.")
+        return
+    if not minhas_permissoes.send_messages:
+        print("❌ Bot sem permissão de enviar mensagens.")
+        return
+    if not minhas_permissoes.embed_links:
+        print("❌ Bot sem permissão de inserir links/embed.")
+        return
+
     embed = montar_embed_ranking(guild)
     view = RankingView()
     message_id = buscar_mensagem_painel()
@@ -534,7 +563,7 @@ async def atualizar_painel_ranking(guild: discord.Guild) -> None:
     try:
         nova_msg = await canal.send(embed=embed, view=view)
         salvar_mensagem_painel(nova_msg.id)
-        print("✅ Painel criado")
+        print(f"✅ Painel criado no canal #{canal.name}")
     except discord.HTTPException as e:
         print(f"❌ Erro ao enviar painel: {e}")
 
@@ -553,7 +582,11 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready() -> None:
-    print(f"Bot online como {bot.user}")
+    print(f"✅ Bot online como {bot.user}")
+    print(f"Servidor alvo: {GUILD_ID}")
+    print(f"Canal aprovados: {CANAL_APROVADOS_ID}")
+    print(f"Canal ranking: {CANAL_RANKING_ID}")
+    print(f"Cargo recrutador: {CARGO_RECRUTADOR_ID}")
 
     bot.add_view(RankingView())
 
@@ -561,9 +594,9 @@ async def on_ready() -> None:
     try:
         bot.tree.copy_global_to(guild=guild)
         synced = await bot.tree.sync(guild=guild)
-        print(f"{len(synced)} comandos sincronizados.")
+        print(f"✅ {len(synced)} comandos sincronizados.")
     except Exception as e:
-        print(f"Erro ao sincronizar comandos: {e}")
+        print(f"❌ Erro ao sincronizar comandos: {e}")
 
 
 @bot.event
@@ -573,9 +606,9 @@ async def on_message(message: discord.Message) -> None:
             processou = await tentar_processar_mensagem(message)
             if processou:
                 await atualizar_painel_ranking(message.guild)
-                print(f"Mensagem processada: {message.id}")
+                print(f"✅ Mensagem processada: {message.id}")
         except Exception as e:
-            print(f"Erro ao processar mensagem {message.id}: {e}")
+            print(f"❌ Erro ao processar mensagem {message.id}: {e}")
 
     await bot.process_commands(message)
 
@@ -594,8 +627,26 @@ async def criar_painel_ranking(interaction: discord.Interaction) -> None:
         await interaction.response.send_message("Você não tem permissão para usar este comando.", ephemeral=True)
         return
 
+    canal = interaction.guild.get_channel(CANAL_RANKING_ID)
+    if canal is None:
+        try:
+            canal = await bot.fetch_channel(CANAL_RANKING_ID)
+        except Exception:
+            await interaction.response.send_message("❌ Canal de ranking não encontrado.", ephemeral=True)
+            return
+
     await atualizar_painel_ranking(interaction.guild)
-    await interaction.response.send_message("✅ Painel do ranking criado/atualizado.", ephemeral=True)
+
+    if isinstance(canal, discord.TextChannel):
+        await interaction.response.send_message(
+            f"✅ Painel do ranking criado/atualizado em {canal.mention}.",
+            ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            "✅ Painel do ranking criado/atualizado.",
+            ephemeral=True
+        )
 
 
 @bot.tree.command(name="ranking_recrutadores", description="Mostra o ranking dos recrutadores")
@@ -637,7 +688,7 @@ async def recontar_recrutadores(interaction: discord.Interaction) -> None:
             if processou:
                 total += 1
         except Exception as e:
-            print(f"Erro ao recontar mensagem {message.id}: {e}")
+            print(f"❌ Erro ao recontar mensagem {message.id}: {e}")
 
     await atualizar_painel_ranking(interaction.guild)
 
