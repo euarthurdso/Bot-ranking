@@ -20,9 +20,9 @@ CANAL_RANKING_ID = 1490386122168209569
 CARGO_RECRUTADOR_ID = 1477814598102155446
 
 CARGOS_ALTOS_IDS = {
-    1458952733494218912,
-    1478243943488422040,
-    1489691679635144936,
+    1458178976190169121, 
+    1458952733494218912,  
+    1489691679635144936,  
 }
 
 IGNORAR_IDS = {
@@ -149,6 +149,44 @@ def buscar_aprovacoes(user_id: int) -> int:
     return row["aprovacoes"] if row else 0
 
 
+def adicionar_aprovacoes(user_id: int, quantidade: int) -> None:
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT OR IGNORE INTO recrutador_stats (user_id, aprovacoes)
+        VALUES (?, 0)
+    """, (user_id,))
+
+    cur.execute("""
+        UPDATE recrutador_stats
+        SET aprovacoes = aprovacoes + ?
+        WHERE user_id = ?
+    """, (quantidade, user_id))
+
+    conn.commit()
+    conn.close()
+
+
+def resetar_aprovacoes_usuario(user_id: int) -> None:
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT OR IGNORE INTO recrutador_stats (user_id, aprovacoes)
+        VALUES (?, 0)
+    """, (user_id,))
+
+    cur.execute("""
+        UPDATE recrutador_stats
+        SET aprovacoes = 0
+        WHERE user_id = ?
+    """, (user_id,))
+
+    conn.commit()
+    conn.close()
+
+
 def salvar_mensagem_painel(message_id: int) -> None:
     conn = get_conn()
     cur = conn.cursor()
@@ -208,7 +246,6 @@ def parsear_mensagem_aprovacao(message: discord.Message) -> Optional[ResultadoPa
         if "erro" in titulo or "erro" in descricao:
             return None
 
-    # 1) embed
     for embed in message.embeds:
         titulo = (embed.title or "").lower()
         descricao = embed.description or ""
@@ -221,7 +258,6 @@ def parsear_mensagem_aprovacao(message: discord.Message) -> Optional[ResultadoPa
                     approved_id=ids_mencionados[1]
                 )
 
-    # 2) conteúdo
     content = message.content or ""
     if "aprovou o formulário" in content.lower():
         ids_mencionados = extrair_ids_do_texto(content)
@@ -231,7 +267,6 @@ def parsear_mensagem_aprovacao(message: discord.Message) -> Optional[ResultadoPa
                 approved_id=ids_mencionados[1]
             )
 
-    # 3) mentions
     if len(message.mentions) >= 2:
         return ResultadoParse(
             approver_id=message.mentions[0].id,
@@ -298,25 +333,193 @@ def montar_embed_ranking(guild: discord.Guild) -> discord.Embed:
     return embed
 
 
+# =========================
+# VIEW / BOTÕES
+# =========================
+
+class AddRecruitmentModal(discord.ui.Modal, title="Adicionar recrutamento"):
+    user_id_input = discord.ui.TextInput(
+        label="ID do recrutador",
+        placeholder="Digite o ID do recrutador",
+        required=True,
+        max_length=25
+    )
+
+    quantidade_input = discord.ui.TextInput(
+        label="Quantidade",
+        placeholder="Digite a quantidade a adicionar",
+        required=True,
+        max_length=10
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Use isso dentro do servidor.", ephemeral=True)
+            return
+
+        if not membro_autorizado(interaction.user):
+            await interaction.response.send_message("Você não tem permissão para usar isso.", ephemeral=True)
+            return
+
+        try:
+            user_id = int(str(self.user_id_input.value).strip())
+            quantidade = int(str(self.quantidade_input.value).strip())
+        except ValueError:
+            await interaction.response.send_message("ID ou quantidade inválidos.", ephemeral=True)
+            return
+
+        if quantidade <= 0:
+            await interaction.response.send_message("A quantidade precisa ser maior que 0.", ephemeral=True)
+            return
+
+        member = interaction.guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await interaction.guild.fetch_member(user_id)
+            except discord.NotFound:
+                await interaction.response.send_message("Usuário não encontrado no servidor.", ephemeral=True)
+                return
+
+        if member.id in IGNORAR_IDS:
+            await interaction.response.send_message("Esse usuário está na lista de ignorados.", ephemeral=True)
+            return
+
+        if not tem_cargo_recrutador(member):
+            await interaction.response.send_message("Esse usuário não possui o cargo Recrutador.", ephemeral=True)
+            return
+
+        adicionar_aprovacoes(member.id, quantidade)
+        await atualizar_painel_ranking(interaction.guild)
+
+        total = buscar_aprovacoes(member.id)
+        await interaction.response.send_message(
+            f"✅ Foram adicionados **{quantidade}** recrutamento(s) para {member.mention}.\n"
+            f"Total atual: **{total}**.",
+            ephemeral=True
+        )
+
+
+class ResetRecruitmentModal(discord.ui.Modal, title="Resetar recrutamento"):
+    user_id_input = discord.ui.TextInput(
+        label="ID do recrutador",
+        placeholder="Digite o ID do recrutador",
+        required=True,
+        max_length=25
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Use isso dentro do servidor.", ephemeral=True)
+            return
+
+        if not membro_autorizado(interaction.user):
+            await interaction.response.send_message("Você não tem permissão para usar isso.", ephemeral=True)
+            return
+
+        try:
+            user_id = int(str(self.user_id_input.value).strip())
+        except ValueError:
+            await interaction.response.send_message("ID inválido.", ephemeral=True)
+            return
+
+        member = interaction.guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await interaction.guild.fetch_member(user_id)
+            except discord.NotFound:
+                await interaction.response.send_message("Usuário não encontrado no servidor.", ephemeral=True)
+                return
+
+        resetar_aprovacoes_usuario(member.id)
+        await atualizar_painel_ranking(interaction.guild)
+
+        await interaction.response.send_message(
+            f"✅ Os recrutamentos de {member.mention} foram resetados.",
+            ephemeral=True
+        )
+
+
+class RankingView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Atualizar ranking",
+        style=discord.ButtonStyle.secondary,
+        emoji="🔄",
+        custom_id="ranking_atualizar"
+    )
+    async def atualizar_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Use isso dentro do servidor.", ephemeral=True)
+            return
+
+        if not membro_autorizado(interaction.user):
+            await interaction.response.send_message("Você não tem permissão para usar este botão.", ephemeral=True)
+            return
+
+        await atualizar_painel_ranking(interaction.guild)
+        await interaction.response.send_message("✅ Ranking atualizado.", ephemeral=True)
+
+    @discord.ui.button(
+        label="Adicionar recrutamento",
+        style=discord.ButtonStyle.success,
+        emoji="➕",
+        custom_id="ranking_add"
+    )
+    async def adicionar_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Use isso dentro do servidor.", ephemeral=True)
+            return
+
+        if not membro_autorizado(interaction.user):
+            await interaction.response.send_message("Você não tem permissão para usar este botão.", ephemeral=True)
+            return
+
+        await interaction.response.send_modal(AddRecruitmentModal())
+
+    @discord.ui.button(
+        label="Resetar recrutamento",
+        style=discord.ButtonStyle.danger,
+        emoji="🗑️",
+        custom_id="ranking_reset"
+    )
+    async def resetar_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Use isso dentro do servidor.", ephemeral=True)
+            return
+
+        if not membro_autorizado(interaction.user):
+            await interaction.response.send_message("Você não tem permissão para usar este botão.", ephemeral=True)
+            return
+
+        await interaction.response.send_modal(ResetRecruitmentModal())
+
+
+# =========================
+# FUNÇÃO DE PAINEL
+# =========================
+
 async def atualizar_painel_ranking(guild: discord.Guild) -> None:
     canal = guild.get_channel(CANAL_RANKING_ID)
     if not isinstance(canal, discord.TextChannel):
         return
 
     embed = montar_embed_ranking(guild)
+    view = RankingView()
     message_id = buscar_mensagem_painel()
 
     if message_id:
         try:
             msg = await canal.fetch_message(message_id)
-            await msg.edit(embed=embed, content=None)
+            await msg.edit(content=None, embed=embed, view=view)
             return
         except discord.NotFound:
             pass
         except discord.HTTPException:
             pass
 
-    nova_msg = await canal.send(embed=embed)
+    nova_msg = await canal.send(embed=embed, view=view)
     salvar_mensagem_painel(nova_msg.id)
 
 
@@ -335,6 +538,8 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready() -> None:
     print(f"Bot online como {bot.user}")
+
+    bot.add_view(RankingView())
 
     guild = discord.Object(id=GUILD_ID)
     try:
@@ -360,33 +565,8 @@ async def on_message(message: discord.Message) -> None:
 
 
 # =========================
-# SLASH COMMANDS
+# COMANDOS
 # =========================
-
-@bot.tree.command(name="ranking_recrutadores", description="Mostra o ranking dos recrutadores")
-async def ranking_recrutadores(interaction: discord.Interaction) -> None:
-    if not interaction.guild:
-        await interaction.response.send_message("Use isso dentro do servidor.", ephemeral=True)
-        return
-
-    embed = montar_embed_ranking(interaction.guild)
-    await interaction.response.send_message(embed=embed)
-
-
-@bot.tree.command(name="aprovacoes_recrutador", description="Mostra quantas aprovações um recrutador tem")
-@app_commands.describe(usuario="Selecione o recrutador")
-async def aprovacoes_recrutador(interaction: discord.Interaction, usuario: discord.Member) -> None:
-    total = buscar_aprovacoes(usuario.id)
-
-    embed = discord.Embed(
-        title="📊 Aprovações do Recrutador",
-        description=f"{usuario.mention} possui **{total}** aprovação(ões).",
-        color=0xFF6A00
-    )
-    embed.set_footer(text="Sistema Mecânica BMI")
-
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
 
 @bot.tree.command(name="criar_painel_ranking", description="Cria ou recria o painel automático do ranking")
 async def criar_painel_ranking(interaction: discord.Interaction) -> None:
@@ -400,6 +580,16 @@ async def criar_painel_ranking(interaction: discord.Interaction) -> None:
 
     await atualizar_painel_ranking(interaction.guild)
     await interaction.response.send_message("✅ Painel do ranking criado/atualizado.", ephemeral=True)
+
+
+@bot.tree.command(name="ranking_recrutadores", description="Mostra o ranking dos recrutadores")
+async def ranking_recrutadores(interaction: discord.Interaction) -> None:
+    if not interaction.guild:
+        await interaction.response.send_message("Use isso dentro do servidor.", ephemeral=True)
+        return
+
+    embed = montar_embed_ranking(interaction.guild)
+    await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(name="recontar_recrutadores", description="Lê o canal de aprovados e refaz toda a contagem")
@@ -439,22 +629,6 @@ async def recontar_recrutadores(interaction: discord.Interaction) -> None:
         f"✅ Recontagem concluída. `{total}` aprovação(ões) registradas.",
         ephemeral=True
     )
-
-
-@bot.tree.command(name="resetar_recrutadores", description="Reseta a contagem dos recrutadores")
-async def resetar_recrutadores(interaction: discord.Interaction) -> None:
-    if not interaction.guild or not isinstance(interaction.user, discord.Member):
-        await interaction.response.send_message("Use isso dentro do servidor.", ephemeral=True)
-        return
-
-    if not membro_autorizado(interaction.user):
-        await interaction.response.send_message("Você não tem permissão para usar este comando.", ephemeral=True)
-        return
-
-    limpar_contagem()
-    await atualizar_painel_ranking(interaction.guild)
-
-    await interaction.response.send_message("✅ Contagem resetada com sucesso.", ephemeral=True)
 
 
 if __name__ == "__main__":
