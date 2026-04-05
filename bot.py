@@ -19,14 +19,12 @@ CANAL_APROVADOS_ID = 1484593179519881379
 CANAL_RANKING_ID = 1490386122168209569
 CARGO_RECRUTADOR_ID = 1477814598102155446
 
-# Cargos superiores que podem usar comandos e botões
 CARGOS_ALTOS_IDS = {
     1458178976190169121,
     1458952733494218912,
     1489691679635144936,
 }
 
-# Usuários ignorados
 IGNORAR_IDS = {
     90931502673148703,
     145847022190304617,
@@ -244,14 +242,12 @@ def extrair_ids_do_texto(texto: str) -> list[int]:
 
 
 def parsear_mensagem_aprovacao(message: discord.Message) -> Optional[ResultadoParse]:
-    # ignora mensagens de erro
     for embed in message.embeds:
         titulo = (embed.title or "").lower()
         descricao = (embed.description or "").lower()
         if "erro" in titulo or "erro" in descricao:
             return None
 
-    # tenta extrair do embed
     for embed in message.embeds:
         titulo = (embed.title or "").lower()
         descricao = embed.description or ""
@@ -264,7 +260,6 @@ def parsear_mensagem_aprovacao(message: discord.Message) -> Optional[ResultadoPa
                     approved_id=ids_mencionados[1]
                 )
 
-    # tenta extrair do conteúdo
     content = message.content or ""
     if "aprovou o formulário" in content.lower():
         ids_mencionados = extrair_ids_do_texto(content)
@@ -274,7 +269,6 @@ def parsear_mensagem_aprovacao(message: discord.Message) -> Optional[ResultadoPa
                 approved_id=ids_mencionados[1]
             )
 
-    # fallback
     if len(message.mentions) >= 2:
         return ResultadoParse(
             approver_id=message.mentions[0].id,
@@ -323,14 +317,14 @@ def montar_embed_ranking(guild: discord.Guild) -> discord.Embed:
     rows = buscar_ranking(20)
 
     if not rows:
-      descricao = "Nenhuma aprovação foi contabilizada ainda."
+        descricao = "Nenhuma aprovação foi contabilizada ainda."
     else:
-      linhas = []
-      for pos, row in enumerate(rows, start=1):
-          member = guild.get_member(row["user_id"])
-          nome = member.mention if member else f"<@{row['user_id']}>"
-          linhas.append(f"**{pos}º** — {nome} • `{row['aprovacoes']}` aprovações")
-      descricao = "\n".join(linhas)
+        linhas = []
+        for pos, row in enumerate(rows, start=1):
+            member = guild.get_member(row["user_id"])
+            nome = member.mention if member else f"<@{row['user_id']}>"
+            linhas.append(f"**{pos}º** — {nome} • `{row['aprovacoes']}` aprovações")
+        descricao = "\n".join(linhas)
 
     embed = discord.Embed(
         title="🏆 Ranking de Recrutadores",
@@ -645,6 +639,34 @@ async def criar_painel_ranking(interaction: discord.Interaction) -> None:
     else:
         await interaction.response.send_message(
             "✅ Painel do ranking criado/atualizado.",
+            ephemeral=True
+        )
+
+
+@bot.tree.command(name="teste_painel", description="Testa se os botões estão sendo enviados")
+async def teste_painel(interaction: discord.Interaction) -> None:
+    if not interaction.guild:
+        await interaction.response.send_message("Sem servidor.", ephemeral=True)
+        return
+
+    try:
+        canal = interaction.guild.get_channel(CANAL_RANKING_ID)
+
+        if canal is None:
+            canal = await bot.fetch_channel(CANAL_RANKING_ID)
+
+        view = RankingView()
+        await canal.send("TESTE DO PAINEL ✅", view=view)
+
+        await interaction.response.send_message(
+            f"✅ Teste enviado em {canal.mention}",
+            ephemeral=True
+        )
+
+    except Exception as e:
+        print("❌ ERRO TESTE PAINEL:", type(e).__name__, e)
+        await interaction.response.send_message(
+            f"❌ Erro ao criar painel de teste: {type(e).__name__} - {e}",
             ephemeral=True
         )
 
